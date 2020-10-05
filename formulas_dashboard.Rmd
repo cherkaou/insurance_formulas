@@ -5,8 +5,6 @@ output:
     orientation: columns
     social: menu
     source_code: "https://github.com/cherkaou/insurance_formulas"
-    #navbar:
-      #- {title: "Source code",href: "https://github.com/cherkaou/insurance_formulas", align: left, data_icon: }
     storyboard: true  
     theme : yeti
 
@@ -22,12 +20,15 @@ library(leaflet)
 library(curl)
 library(caTools) 
 library(e1071) 
+library(RColorBrewer)
 ```
 
 Data Exploration and analysis {.storyboard}
 ========================
 
-### Les formules les plus populaires en nombre de souscripteurs  
+
+
+### Les formules choisies en fonction du nombre de souscripteurs  
 
 ```{r}
 fic_contrats = "http://dataks.bitbucket.io/assurance/contrats.csv"
@@ -81,13 +82,14 @@ names(data_plot_all) = c("formule","Nombre de soucripteurs")
 ggplot(data = data_plot,  aes (x =reorder(formule,`Nombre de soucripteurs`),y = `Nombre de soucripteurs`, fill = Sex)) +labs(title = "Nombre de souscripteurs par formule") + xlab("Les formules proposées")+ geom_col()  + coord_flip() + theme_minimal()
 ```
 
-*** 
-On compare les formules entre elles : nb_souscripteurs, duree_spuscription, taux_resiliation 
 
-Nous nous intéressons dans un premier lieu aux formules les plus souscrites. Nous remarquons que la formule 4 est la plus populaire. Quel est le profil des souscripteurs de chaque formule? 
+***
+
+La problématique à laquelle nous nous sommes intéressés dans ce projet est le choix des formules souscrites à un contrat d'assurance à partir de la base de données fournie. En premier lieu, nous comparons les formules entre elles selon divers critères : le nombre de souscripteurs à une formule données, les formules les plus recommandées par les comparateurs utilisés par les assurés,  la durée de souscriptions des formules ainsi que le taux de résiliation de chaque formule. Ensuite, nous nous intéressons aux profils des assurés pour essayer de comprendre leur choix de formule. En dernier lieu, nous appliquons un k-means à nos données. L'objectif est de proposer de nouvelles formules en fonction des groupes formés. 
 
 
-### Les formules choisies par comparateur 
+### Les formules choisies en fonction des comparateurs 
+
 
 ```{r}
 data_plot_compar = aggregate(df_contrats$IDPOL, by = list(df_contrats$FORMU, df_contrats$COMPAR), FUN = length )
@@ -99,7 +101,9 @@ names(data_plot_compar) = c("formule","Comparateur","Nombre de soucripteurs")
 ggplot(data = data_plot_compar,  aes (x =reorder(Comparateur,`Nombre de soucripteurs`),y = `Nombre de soucripteurs`, fill = formule)) +labs(title = "Nombre de souscripteurs par comparateur") + xlab("Les Comparateurs")+ geom_col()  + coord_flip() + theme_minimal()
 ```
 
+*** 
 
+La formule 4 est la plus populaire parmi les assurés. Ceci pourrait s'expliquer par le fait que les comparateurs la recommandent davantage que les autres formules.
 
 ### La durée de souscription moyenne par formule 
 
@@ -119,12 +123,12 @@ data_plot_par_duree$Duree_Contrat = (data_plot_par_duree$Duree_Contrat)
 
 
 ```{r}
-ggplot(data = data_plot_par_duree,  aes (x =reorder(formule,Duree_Contrat),y = Duree_Contrat)) + geom_col() + labs(title = "Duree moyenne Contrat par formule en jours") + coord_flip() + ylab("Duree moyenne de contrat en jours") + xlab("Formules") + theme_minimal() +  geom_text(aes(label=paste("~",signif(Duree_Contrat/365,3),"years")), color = "white", hjust=1.05, size = 3)
+ggplot(data = data_plot_par_duree,  aes (x =reorder(formule,Duree_Contrat),y = Duree_Contrat)) + geom_col() + labs(title = "Duree de soucription moyenne par formule") + coord_flip() + ylab("Duree moyenne de souscription en jours") + xlab("Formules") + theme_minimal() +  geom_text(aes(label=paste("~",signif(Duree_Contrat/365,3),"years")), color = "white", hjust=1.05, size = 3)
 ```
 
 *** 
 
-On choisit la moyenne car cela nous permet de diviser par le nombre de souscriptions dans chaque formule et par conséquent comparer les 4 formules vu que les 4 échantillons n'ont pas la même taille. On va s'intéresser ensuite aux formules  
+En moyenne, parmi les formules présentes dans la base, la formue 4, qui compte le plus grand nombre de souscripteurs, est celle dont la durée de souscription est la plus faible. 
 
 
 ### Le taux de résiliation par formules 
@@ -144,8 +148,7 @@ ggplot(data = data_plot_res,  aes (x =reorder(formule,taux_res),y = taux_res)) +
 
 *** 
 
-Il en sort que la formule 4 est celle qui compte le plus grand nombre de souscripteurs, a la durée de souscription la plus longue en moyenne et est celle qui a le taux de résiliation le plus faible. On s'intéresse aux personnes qui ont résilié leurs formules.
-
+Il en sort que la formule 4 a la durée de souscription la plus courte en moyenne sans être celle qui a le taux de résiliation le plus fort. Il est possible qu'elle offre des durées de souscriptions plus courtes et qu'elle soit sans engagement. Cela pourrait expliquer ce phénomène. 
 
 ### La durée de contrats des personnes ayant résilié par formules
 
@@ -155,10 +158,10 @@ ggplot(data = data_personnes_ayant_resilie, aes(x = reorder(FORMU, DureeContrat)
 ```
 
 ***
-Il en sort que pour la moitié des souscripteurs de chaque formule, la formule 2 a été gardée plus longtemps que d'autres
 
+La moitié des personnes ayant souscrit à la formule 4 ont résilié leurs contrats avant les personnes qui ont souscrit aux trois autres formules. 
 
-### Le montant des prestations par formule 
+### La répartition des prestations par formule
 
 ```{r}
 sum_amounts_glob = aggregate(df_pres$Amt, by = list(df_pres$IDPOL), FUN = sum)
@@ -172,6 +175,13 @@ sum_amounts = merge(sum_amounts, sum_amounts_glob)
 df_merge_contrats_amt = merge(df_contrats_duree_contrat_clean, sum_amounts, by = "IDPOL", all.x = TRUE)
 ```
 
+
+
+```{r}
+df_merge_contrats_amt$Categories = replace(df_merge_contrats_amt$Categories,df_merge_contrats_amt$Categories == "Soins Ambulatoires","Soins ambulatoires")
+```
+
+
 ```{r}
 df_plot_agreg = aggregate(df_merge_contrats_amt$SOMME_PREST_GLOB, by = list(df_merge_contrats_amt$FORMU, df_merge_contrats_amt$Categories), FUN = sum)
 names(df_plot_agreg) = c("FORMU", "Categories","SOMME_PRESTATIONS_PAR_FORMU")
@@ -180,14 +190,14 @@ names(df_plot_agreg) = c("FORMU", "Categories","SOMME_PRESTATIONS_PAR_FORMU")
 
 
 ```{r}
-ggplot(data = df_plot_agreg,  aes (x = reorder(FORMU, SOMME_PRESTATIONS_PAR_FORMU),y = SOMME_PRESTATIONS_PAR_FORMU, fill = Categories)) + geom_col() + labs(title = "Somme des prestations par formule") + ylab("La somme des prestations par formule") + xlab("Formules") + coord_flip() + theme_minimal()
+ggplot(data = df_plot_agreg,  aes (x = reorder(FORMU, SOMME_PRESTATIONS_PAR_FORMU/data_plot_all$`Nombre de soucripteurs`),y = SOMME_PRESTATIONS_PAR_FORMU/data_plot_all$`Nombre de soucripteurs`, fill = Categories)) + geom_col() + labs(title = "Somme des prestations par formule et par personne") + ylab("La somme des prestations par formule") + xlab("Formules") + coord_flip() + theme_minimal()
 ```
 
 ***
 
-(Quelle formule demande le plus de prestations et dans quelle catégorie)
+Les soins ambulatoires occupent une grande partie des soins remboursés par les formules 4 et 1; ce sont les soins les plus fréquents chez les assurés. La formule 2 quant à elle ne rembourse que les frais d'hospitalisation. Il est tout à fait possible que cette formule soit dédiée aux soins hospitaliers. Son faible taux de souscription en est probablement la conséquence.
 
-### Le profil des souscripteurs 
+### La situation familiale
 
 ```{r}
 data_plot_profile = aggregate(df_contrats$IDPOL, by = list(df_contrats$FORMU, df_contrats$MARCLI), FUN = length )
@@ -195,30 +205,34 @@ names(data_plot_profile) = c("formule", "Situation_Maritale","Nombre de soucript
 ```
 
 ```{r}
-ggplot(data = data_plot_profile,  aes (x =reorder(formule,-`Nombre de soucripteurs`),y = `Nombre de soucripteurs`, fill = Situation_Maritale)) +labs(title = "Nombre de souscripteurs par formule") + xlab("Les formules proposées")+ geom_col(position = position_dodge()) 
+ggplot(data = data_plot_profile,  aes (x =reorder(formule,-`Nombre de soucripteurs`),y = `Nombre de soucripteurs`/data_plot_all$`Nombre de soucripteurs`, fill = Situation_Maritale)) +labs(title = "Nombre de souscripteurs par formule") + xlab("Les formules proposées") + ylab("Le pourcentage de chaque catégorie dans les formules")+ geom_col(position = position_dodge()) 
 ```
 
 
 *** 
 
-Nous remarquons que les célibataires sont les plus représentés dans la formule 4. 
+Plus de 50% des souscripteurs de la formule 4 sont célibataires. La formule 1 quant à elle attire en pourcentage plus de couples mariés et pacsés. Il est à noter également que la formule 3 n'a été souscrite par aucune personne en situation de veuvage.
 
 
 
-### Le profil des soucripteurs
+### Les catégories professionnelles
 
 ```{r}
 data_plot_profession = aggregate(df_contrats$IDPOL, by = list(df_contrats$FORMU, df_contrats$PROFCLI), FUN = length )
 names(data_plot_profession) = c("formule", "Profession_soucripteur","Nombre de soucripteurs")
 ```
 
+
+
+
 ```{r}
-ggplot(data = data_plot_profession,  aes (x =reorder(formule,-`Nombre de soucripteurs`),y = `Nombre de soucripteurs`, fill = Profession_soucripteur)) +labs(title = "Nombre de souscripteurs par formule") + xlab("Les formules proposées")+ geom_col(position = position_dodge()) 
+ggplot(data = data_plot_profession,  aes (x =reorder(formule,-`Nombre de soucripteurs`),y = `Nombre de soucripteurs`, fill = Profession_soucripteur)) +labs(title = "Les catégories professionnelles par formule ") + xlab("Les formules proposées")+ ylab("Les catégories professionnalles")+geom_col()
 ```
+
 
 *** 
 
-Some commentary about Frame 2.
+Les salariés, toutes catégories confondues, sont les plus représentés dans les quatre formules.  
 
 
 ### Heatmap 
@@ -231,24 +245,27 @@ df_contrats_duree_contrat_clean$age =  as.double(difftime(date,df_contrats_duree
 
 
 ```{r}
-nb_beneficiaire_moyen = aggregate(df_contrats_duree_contrat_clean$Nb_beneficaires, by = list(df_contrats_duree_contrat_clean$FORMU), FUN = mean )$x
-prime_moyen = aggregate(as.double(df_contrats_duree_contrat_clean$AMTPREM), by = list(df_contrats_duree_contrat_clean$FORMU), FUN = mean )$x
+NB_beneficiaires_moyen = aggregate(df_contrats_duree_contrat_clean$Nb_beneficaires, by = list(df_contrats_duree_contrat_clean$FORMU), FUN = mean )$x
+prime_moyenne = aggregate(as.double(df_contrats_duree_contrat_clean$AMTPREM), by = list(df_contrats_duree_contrat_clean$FORMU), FUN = mean )$x
 age_moyen = aggregate(as.double(df_contrats_duree_contrat_clean$age), by = list(df_contrats_duree_contrat_clean$FORMU), FUN = mean )$x
 age_median = aggregate(as.double(df_contrats_duree_contrat_clean$age), by = list(df_contrats_duree_contrat_clean$FORMU), FUN = median)$x
-data_heatmap = data.frame(nb_beneficiaire_moyen, prime_moyen, age_moyen, age_median,row.names = c("FORMU1","FORMU2","FORMU3","FORMU4"))
+data_heatmap = data.frame(NB_beneficiaires_moyen, prime_moyenne, age_moyen, age_median,row.names = c("FORMU1","FORMU2","FORMU3","FORMU4"))
 ```
 
 
 ```{r}
-heatmap.2(as.matrix(data_heatmap), cm.colors(256), scale = "column", margins = c(10,10),
-               ylab =  "Formules", Colv = NA, Rowv = NA, main = "Heatmap des formules ", cexCol  = 1, cexRow = 1)
+heatmap(as.matrix(data_heatmap), cm.colors(256), scale = "column", margins = c(10,10),
+               ylab =  "Formules", xlab = "Caractéristiques", Colv = NA, Rowv = NA, main = "Quelques caractéristiques des assurés", cexCol  = 1, cexRow = 1,col= colorRampPalette(brewer.pal(9, "Reds"))(6))
+
+legend(x="bottomright", legend=c("min", "ave", "max"), 
+     fill=colorRampPalette(brewer.pal(9, "Reds"))(3))
 ```
 
 
 
 ****
 
-En moyenne, les personnes choisissant la formule 3 associent moins de bénéficiaires à leur contrat et sont les plus jeunes, cela pourrait s'expliquer par leur situation familiale (absence d'enfants)
+En moyenne, les personnes choisissant la formule 3 associent moins de bénéficiaires à leur contrat et sont plus jeunes. Cela pourrait s'explique facilement par le fait qu'ils n'aient pas encore d'enfants en vue de leur jeune âge. Les personnes choisissant la formule 2 sont les plus âgées. Il est donc cohérent qu'elles choisissent la formule qui couvrent le mieux les frais d'hospitalisation. 
 
 
 
@@ -377,11 +394,7 @@ renderPlot({
 })
 ```
 
-> Description
 
-## About dygraphs
-
-Description
 
 
 
