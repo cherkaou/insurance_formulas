@@ -1,0 +1,390 @@
+---
+title: "Subscription formulas for an insurance contract "
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    social: menu
+    source_code: "https://github.com/cherkaou/insurance_formulas"
+    #navbar:
+      #- {title: "Source code",href: "https://github.com/cherkaou/insurance_formulas", align: left, data_icon: }
+    storyboard: true  
+    theme : yeti
+
+runtime: shiny
+---
+
+```{r global, include=FALSE}
+library(ggplot2)
+library(gplots)
+library(dplyr)
+library(leaflet)
+#installer libcurl4-openssl-dev pour pouvoir installer la librairie curl de R 
+library(curl)
+library(caTools) 
+library(e1071) 
+```
+
+Data Exploration and analysis {.storyboard}
+========================
+
+### Les formules les plus populaires en nombre de souscripteurs  
+
+```{r}
+fic_contrats = "http://dataks.bitbucket.io/assurance/contrats.csv"
+df_contrats= read.csv2(fic_contrats)
+fic_pres = "http://dataks.bitbucket.io/assurance/prestations_bene.csv"
+df_pres = read.csv2(fic_pres)
+```
+
+```{r}
+#Cette fonction compte le nombre de bénéficiaires d'un contrat
+f = function(x){
+  #Si les variables IDPART et IDCHI1 sont nuls, on est sûr que seul le soucripteur du contrat (le client) est bénéficiaire
+  if(is.na(x[4]) && is.na(x[5])){
+    return(1)
+  }
+  else{
+    return(sum(!(is.na(x[4:10]))) + 1)  
+  }
+}
+
+df_contrats$"Nb_beneficaires" =  apply(df_contrats, 1, f)
+```
+
+```{r}
+#Calcul de la durée de vie d'un contrat 
+df_contrats$DATECAN = as.Date(df_contrats$DATECAN, format = "%Y-%d-%m")
+df_contrats$DATEEFF = as.Date(df_contrats$DATEEFF, format = "%Y-%d-%m")
+df_contrats$DTNCLI = as.Date(df_contrats$DTNCLI, format = "%Y-%d-%m")
+df_contrats$DureeContrat =  difftime(df_contrats$DATECAN, df_contrats$DATEEFF, units = "days")
+```
+
+```{r}
+#Les clients qui n'ont pas encore résilié : on considère que la date à laquelle on regarde la durée de vie du contrat c'est c'est le 01/01/2018
+date = as.Date("2018-01-01",format = "%Y-%d-%m")
+df_contrats[is.na(df_contrats$DureeContrat) ,]$DureeContrat = difftime(date,df_contrats[is.na(df_contrats$DureeContrat) ,]$DATEEFF, units = "days")
+```
+
+
+```{r}
+data_plot = aggregate(df_contrats$IDPOL, by = list(df_contrats$FORMU, df_contrats$SEXCLI), FUN = length )
+names(data_plot) = c("formule","Sex","Nombre de soucripteurs")
+```
+
+```{r}
+data_plot_all = aggregate(df_contrats$IDPOL, by = list(df_contrats$FORMU), FUN = length )
+names(data_plot_all) = c("formule","Nombre de soucripteurs")
+```
+
+
+```{r}
+ggplot(data = data_plot,  aes (x =reorder(formule,`Nombre de soucripteurs`),y = `Nombre de soucripteurs`, fill = Sex)) +labs(title = "Nombre de souscripteurs par formule") + xlab("Les formules proposées")+ geom_col()  + coord_flip() + theme_minimal()
+```
+
+*** 
+On compare les formules entre elles : nb_souscripteurs, duree_spuscription, taux_resiliation 
+
+Nous nous intéressons dans un premier lieu aux formules les plus souscrites. Nous remarquons que la formule 4 est la plus populaire. Quel est le profil des souscripteurs de chaque formule? 
+
+
+### Les formules choisies par comparateur 
+
+```{r}
+data_plot_compar = aggregate(df_contrats$IDPOL, by = list(df_contrats$FORMU, df_contrats$COMPAR), FUN = length )
+names(data_plot_compar) = c("formule","Comparateur","Nombre de soucripteurs")
+```
+
+
+```{r}
+ggplot(data = data_plot_compar,  aes (x =reorder(Comparateur,`Nombre de soucripteurs`),y = `Nombre de soucripteurs`, fill = formule)) +labs(title = "Nombre de souscripteurs par comparateur") + xlab("Les Comparateurs")+ geom_col()  + coord_flip() + theme_minimal()
+```
+
+
+
+### La durée de souscription moyenne par formule 
+
+
+```{r}
+#On enlève les contrats dont la duree Contrat est NA pour les contrats dont la DATCAN est NA et on garde que les duree >0 
+df_contrats_duree_contrat_clean =df_contrats[df_contrats$DureeContrat >0 ,]
+```
+
+
+
+```{r}
+data_plot_par_duree = aggregate(df_contrats_duree_contrat_clean$DureeContrat, by = list(df_contrats_duree_contrat_clean$FORMU), FUN = mean)
+names(data_plot_par_duree) = c("formule","Duree_Contrat")
+data_plot_par_duree$Duree_Contrat = (data_plot_par_duree$Duree_Contrat)
+```
+
+
+```{r}
+ggplot(data = data_plot_par_duree,  aes (x =reorder(formule,Duree_Contrat),y = Duree_Contrat)) + geom_col() + labs(title = "Duree moyenne Contrat par formule en jours") + coord_flip() + ylab("Duree moyenne de contrat en jours") + xlab("Formules") + theme_minimal() +  geom_text(aes(label=paste("~",signif(Duree_Contrat/365,3),"years")), color = "white", hjust=1.05, size = 3)
+```
+
+*** 
+
+On choisit la moyenne car cela nous permet de diviser par le nombre de souscriptions dans chaque formule et par conséquent comparer les 4 formules vu que les 4 échantillons n'ont pas la même taille. On va s'intéresser ensuite aux formules  
+
+
+### Le taux de résiliation par formules 
+
+
+```{r}
+#taux_res = nb_personnes ayant résilié leur contrat / nb_personnes ayant souscrit au contrat : on considère que si REACAN est NA ou DATECAN est NA alors il y a eu résiliation
+data_plot_res = aggregate(df_contrats_duree_contrat_clean[!is.na(df_contrats_duree_contrat_clean$REACAN),]$IDPOL, by = list(df_contrats_duree_contrat_clean[!is.na(df_contrats_duree_contrat_clean$REACAN),]$FORMU), FUN = length )
+names(data_plot_res) = c("formule","Nombre_Personnes_ayant_resilie")
+data_plot_res$taux_res = data_plot_res$Nombre_Personnes_ayant_resilie/data_plot_all$`Nombre de soucripteurs`
+```
+
+
+```{r}
+ggplot(data = data_plot_res,  aes (x =reorder(formule,taux_res),y = taux_res)) + geom_col() + labs(title = "Taux de résiliation par formule") + coord_flip() + ylab("Le taux de résiliation par formule") + xlab("Formules") + theme_minimal() +  geom_text(aes(label=paste(signif(taux_res*100, digits = 3),"%")), color = "white", hjust=1.05, size = 3)
+```
+
+*** 
+
+Il en sort que la formule 4 est celle qui compte le plus grand nombre de souscripteurs, a la durée de souscription la plus longue en moyenne et est celle qui a le taux de résiliation le plus faible. On s'intéresse aux personnes qui ont résilié leurs formules.
+
+
+### La durée de contrats des personnes ayant résilié par formules
+
+```{r}
+data_personnes_ayant_resilie = df_contrats_duree_contrat_clean[!is.na(df_contrats_duree_contrat_clean$REACAN),]
+ggplot(data = data_personnes_ayant_resilie, aes(x = reorder(FORMU, DureeContrat), y = DureeContrat )) + geom_boxplot() + labs(x = "Formules", y = "Duree Contrats des personnes en jours ayant résilié", title = "Duree Contrats des personnes ayant résilié par formules") + theme_minimal() + coord_flip() 
+```
+
+***
+Il en sort que pour la moitié des souscripteurs de chaque formule, la formule 2 a été gardée plus longtemps que d'autres
+
+
+### Le montant des prestations par formule 
+
+```{r}
+sum_amounts_glob = aggregate(df_pres$Amt, by = list(df_pres$IDPOL), FUN = sum)
+names(sum_amounts_glob) = c("IDPOL", "SOMME_PREST_GLOB")
+
+sum_amounts = aggregate(df_pres$Amt, by = list(df_pres$IDPOL, df_pres$Categories), FUN = sum)
+names(sum_amounts) = c("IDPOL","Categories" , "SOMME_PRESTATIONS_PAR_CAT")
+sum_amounts = merge(sum_amounts, sum_amounts_glob)
+
+#Cette base de données ne contient que les contrats ayant demandé des prestations
+df_merge_contrats_amt = merge(df_contrats_duree_contrat_clean, sum_amounts, by = "IDPOL", all.x = TRUE)
+```
+
+```{r}
+df_plot_agreg = aggregate(df_merge_contrats_amt$SOMME_PREST_GLOB, by = list(df_merge_contrats_amt$FORMU, df_merge_contrats_amt$Categories), FUN = sum)
+names(df_plot_agreg) = c("FORMU", "Categories","SOMME_PRESTATIONS_PAR_FORMU")
+```
+
+
+
+```{r}
+ggplot(data = df_plot_agreg,  aes (x = reorder(FORMU, SOMME_PRESTATIONS_PAR_FORMU),y = SOMME_PRESTATIONS_PAR_FORMU, fill = Categories)) + geom_col() + labs(title = "Somme des prestations par formule") + ylab("La somme des prestations par formule") + xlab("Formules") + coord_flip() + theme_minimal()
+```
+
+***
+
+(Quelle formule demande le plus de prestations et dans quelle catégorie)
+
+### Le profil des souscripteurs 
+
+```{r}
+data_plot_profile = aggregate(df_contrats$IDPOL, by = list(df_contrats$FORMU, df_contrats$MARCLI), FUN = length )
+names(data_plot_profile) = c("formule", "Situation_Maritale","Nombre de soucripteurs")
+```
+
+```{r}
+ggplot(data = data_plot_profile,  aes (x =reorder(formule,-`Nombre de soucripteurs`),y = `Nombre de soucripteurs`, fill = Situation_Maritale)) +labs(title = "Nombre de souscripteurs par formule") + xlab("Les formules proposées")+ geom_col(position = position_dodge()) 
+```
+
+
+*** 
+
+Nous remarquons que les célibataires sont les plus représentés dans la formule 4. 
+
+
+
+### Le profil des soucripteurs
+
+```{r}
+data_plot_profession = aggregate(df_contrats$IDPOL, by = list(df_contrats$FORMU, df_contrats$PROFCLI), FUN = length )
+names(data_plot_profession) = c("formule", "Profession_soucripteur","Nombre de soucripteurs")
+```
+
+```{r}
+ggplot(data = data_plot_profession,  aes (x =reorder(formule,-`Nombre de soucripteurs`),y = `Nombre de soucripteurs`, fill = Profession_soucripteur)) +labs(title = "Nombre de souscripteurs par formule") + xlab("Les formules proposées")+ geom_col(position = position_dodge()) 
+```
+
+*** 
+
+Some commentary about Frame 2.
+
+
+### Heatmap 
+
+
+```{r}
+df_contrats_duree_contrat_clean = df_contrats_duree_contrat_clean[!is.na(df_contrats_duree_contrat_clean$DTNCLI),]
+df_contrats_duree_contrat_clean$age =  as.double(difftime(date,df_contrats_duree_contrat_clean$DTNCLI, units = "days")/365)
+```
+
+
+```{r}
+nb_beneficiaire_moyen = aggregate(df_contrats_duree_contrat_clean$Nb_beneficaires, by = list(df_contrats_duree_contrat_clean$FORMU), FUN = mean )$x
+prime_moyen = aggregate(as.double(df_contrats_duree_contrat_clean$AMTPREM), by = list(df_contrats_duree_contrat_clean$FORMU), FUN = mean )$x
+age_moyen = aggregate(as.double(df_contrats_duree_contrat_clean$age), by = list(df_contrats_duree_contrat_clean$FORMU), FUN = mean )$x
+age_median = aggregate(as.double(df_contrats_duree_contrat_clean$age), by = list(df_contrats_duree_contrat_clean$FORMU), FUN = median)$x
+data_heatmap = data.frame(nb_beneficiaire_moyen, prime_moyen, age_moyen, age_median,row.names = c("FORMU1","FORMU2","FORMU3","FORMU4"))
+```
+
+
+```{r}
+heatmap.2(as.matrix(data_heatmap), cm.colors(256), scale = "column", margins = c(10,10),
+               ylab =  "Formules", Colv = NA, Rowv = NA, main = "Heatmap des formules ", cexCol  = 1, cexRow = 1)
+```
+
+
+
+****
+
+En moyenne, les personnes choisissant la formule 3 associent moins de bénéficiaires à leur contrat et sont les plus jeunes, cela pourrait s'expliquer par leur situation familiale (absence d'enfants)
+
+
+
+### Répartition géographique des consommateurs 
+
+
+
+
+```{r}
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+df_formu_domi = aggregate(FORMU ~ CP, df_contrats_duree_contrat_clean, Mode)
+```
+
+
+```{r}
+df_gps = read.csv2("https://www.data.gouv.fr/fr/datasets/r/554590ab-ae62-40ac-8353-ee75162c05ee")
+colnames(df_gps)[3] = c("CP")
+```
+
+
+```{r}
+df_gps_cp =  merge(df_formu_domi, df_gps)
+```
+
+
+```{r}
+f_gps_lat = function(x){
+  s = strsplit(as.character(x[7]), split = ",")
+  return(as.double(s[[1]][1]))
+}
+
+f_gps_long = function(x){
+  s = strsplit(as.character(x[7]), split = ",")
+  return(as.double(s[[1]][2]))
+}
+
+```
+```{r}
+df_gps_cp$Lat = apply(df_gps_cp, 1, f_gps_lat)
+df_gps_cp$Long = apply(df_gps_cp, 1, f_gps_long)
+```
+
+
+```{r}
+groups = as.character(unique(df_gps_cp$FORMU))
+
+map = leaflet(df_gps_cp) %>% addTiles(group = "OpenStreetMap")
+for(g in groups){
+  d = df_gps_cp[df_gps_cp$FORMU == g, ]
+  map = map %>% addCircleMarkers(data = d, lng = ~Long, lat = ~Lat, 
+                                 color = ~FORMU,
+                                 group = g)
+
+}
+map %>% addLayersControl(overlayGroups = groups)
+```
+
+
+
+K-means {data-icon="fa-hashtag" data-navmenu="Modelisation" }
+===================================== 
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+
+Modélisation K-means
+
+
+```{r}
+df_mod = merge(df_contrats_duree_contrat_clean, df_merge_contrats_amt)
+```
+
+
+
+
+```{r}
+df_k_means_plot = select(df_mod, AMTPREM, SOMME_PREST_GLOB, age, DureeContrat,Nb_beneficaires)
+df_k_means_plot$AMTPREM = as.double(df_k_means_plot$AMTPREM)
+df_k_means_plot$DureeContrat = as.double(df_k_means_plot$DureeContrat)
+```
+
+
+```{r}
+df_k_means_plot = as.data.frame(scale(df_k_means_plot))
+```
+
+
+```{r}
+selectInput('xcol', 'X Variable', names(df_k_means_plot),selected=names(df_k_means_plot)[[3]])
+    
+selectInput('ycol', 'Y Variable', names(df_k_means_plot),
+                selected=names(df_k_means_plot)[[1]])
+    
+numericInput('clusters', 'Cluster count', 4,
+              min = 1, max = 9)
+```
+
+Column
+-----------------------------------------------------------------------
+
+### K Means
+
+```{r}
+palette(c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3",
+  "#FF7F00", "#FFFF33", "#A65628", "#F781BF", "#999999"))
+
+# Combine the selected variables into a new data frame
+selectedData <- reactive({
+  df_k_means_plot[, c(input$xcol, input$ycol)]
+})
+
+clusters <- reactive({
+  kmeans(na.omit(selectedData()), input$clusters)
+})
+
+renderPlot({
+  par(mar = c(5.1, 4.1, 0, 1))
+  plot(selectedData(),
+       col = clusters()$cluster,
+       pch = 20, cex = 3)
+  points(clusters()$centers, pch = 4, cex = 4, lwd = 4)
+})
+```
+
+> Description
+
+## About dygraphs
+
+Description
+
+
+
+
+
+
